@@ -939,7 +939,7 @@ void jl_add_optimization_passes_impl(LLVMPassManagerRef PM, int opt_level, int l
 }
 
 // new pass manager
-void addPipeline(ModulePassManager &MPM, int opt_level, bool lower_intrinsics, bool dump_native)
+void addPipeline(ModulePassManager &MPM, int opt_level, OptimizationOptions options)
 {
     // TODO: CommonInstruction hoisting/sinking enables AllocOpt
     //       to merge allocations and sometimes eliminate them,
@@ -958,7 +958,7 @@ void addPipeline(ModulePassManager &MPM, int opt_level, bool lower_intrinsics, b
 
     MPM.addPass(ConstantMergePass());
     if (opt_level < 2) {
-        if (!dump_native) {
+        if (!options.dump_native) {
             // we won't be multiversioning, so lower CPU feature checks early on
             // so that we can avoid an additional CFG simplification pass at the end.
             MPM.addPass(CPUFeatures());
@@ -983,7 +983,7 @@ void addPipeline(ModulePassManager &MPM, int opt_level, bool lower_intrinsics, b
         }
         MPM.addPass(AlwaysInlinerPass());
         MPM.addPass(LowerSIMDLoop()); // Annotate loop marked with "loopinfo" as LLVM parallel loop
-        if (lower_intrinsics) {
+        if (options.lower_intrinsics) {
             // TODO: Barrier Pass?
             {
                 FunctionPassManager FPM;
@@ -998,14 +998,14 @@ void addPipeline(ModulePassManager &MPM, int opt_level, bool lower_intrinsics, b
                 MPM.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(FPM)));
             }
             MPM.addPass(FinalLowerGCPass());
-            MPM.addPass(LowerPTLSPass(dump_native));
+            MPM.addPass(LowerPTLSPass(options.dump_native));
         }
         else {
             MPM.addPass(RemoveNI());
         }
         MPM.addPass(LowerSIMDLoop()); // Annotate loop marked with "loopinfo" as LLVM parallel loop
-        if (dump_native) {
-            MPM.addPass(MultiVersioning());
+        if (options.dump_native) {
+            MPM.addPass(MultiVersioning(options.external_use));
             MPM.addPass(CPUFeatures());
             // minimal clean-up to get rid of CPU feature checks
             if (opt_level == 1) {
@@ -1051,8 +1051,8 @@ void addPipeline(ModulePassManager &MPM, int opt_level, bool lower_intrinsics, b
         FPM.addPass(SimplifyCFGPass(simplifyCFGOptions));
     }
 
-    if (dump_native)
-        MPM.addPass(MultiVersioning());
+    if (options.dump_native)
+        MPM.addPass(MultiVersioning(options.external_use));
     MPM.addPass(CPUFeatures());
     {
         FunctionPassManager FPM;
@@ -1157,7 +1157,7 @@ void addPipeline(ModulePassManager &MPM, int opt_level, bool lower_intrinsics, b
         MPM.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(FPM)));
     }
 
-    if (lower_intrinsics) {
+    if (options.lower_intrinsics) {
         // LowerPTLS removes an indirect call. As a result, it is likely to trigger
         // LLVM's devirtualization heuristics, which would result in the entire
         // pass pipeline being re-exectuted. Prevent this by inserting a barrier.
@@ -1191,7 +1191,7 @@ void addPipeline(ModulePassManager &MPM, int opt_level, bool lower_intrinsics, b
             FPM.addPass(DCEPass());
             MPM.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(FPM)));
         }
-        MPM.addPass(LowerPTLSPass(dump_native));
+        MPM.addPass(LowerPTLSPass(options.dump_native));
         // Clean up write barrier and ptls lowering
         {
             FunctionPassManager FPM;
@@ -1225,7 +1225,7 @@ void addPipeline(ModulePassManager &MPM, int opt_level, bool lower_intrinsics, b
 // or adapting PassBuilder (or subclassing it) to suite our needs. This is in particular important for
 // BPF, NVPTX, and AMDGPU.
 
-void optimizeModule(Module &M, TargetMachine *TM, int opt_level, bool lower_intrinsics, bool dump_native)
+void optimizeModule(Module &M, TargetMachine *TM, int opt_level, OptimizationOptions options)
 {
     // llvm::PassBuilder pb(targetMachine->LLVM, llvm::PipelineTuningOptions(), llvm::None, &passInstrumentationCallbacks);
     PassBuilder PB;
@@ -1262,7 +1262,7 @@ void optimizeModule(Module &M, TargetMachine *TM, int opt_level, bool lower_intr
     PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
     ModulePassManager MPM;
-    addPipeline(MPM, opt_level, lower_intrinsics, dump_native);
+    addPipeline(MPM, opt_level, options);
 
     MPM.run(M, MAM);
 }
