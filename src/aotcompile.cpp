@@ -534,20 +534,22 @@ void jl_dump_native_impl(void *native_code,
     std::vector<NewArchiveMember> unopt_bc_Archive;
     std::vector<std::string> outputs;
 
-    legacy::PassManager preopt, postopt;
+    ModuleAnalysisManager none;
+    ModulePassManager preopt, postopt;
+    legacy::PassManager emitter;
 
     if (unopt_bc_fname)
-        preopt.add(createBitcodeWriterPass(unopt_bc_OS));
+        preopt.addPass(BitcodeWriterPass(unopt_bc_OS));
 
-    //Is this necessary for TM?
-    // addTargetPasses(&postopt, TM->getTargetTriple(), TM->getTargetIRAnalysis());
     if (bc_fname)
-        postopt.add(createBitcodeWriterPass(bc_OS));
+        postopt.addPass(BitcodeWriterPass(bc_OS));
+    //Is this necessary for TM?
+    addTargetPasses(&emitter, TM->getTargetTriple(), TM->getTargetIRAnalysis());
     if (obj_fname)
-        if (TM->addPassesToEmitFile(postopt, obj_OS, nullptr, CGFT_ObjectFile, false))
+        if (TM->addPassesToEmitFile(emitter, obj_OS, nullptr, CGFT_ObjectFile, false))
             jl_safe_printf("ERROR: target does not support generation of object files\n");
     if (asm_fname)
-        if (TM->addPassesToEmitFile(postopt, asm_OS, nullptr, CGFT_AssemblyFile, false))
+        if (TM->addPassesToEmitFile(emitter, asm_OS, nullptr, CGFT_AssemblyFile, false))
             jl_safe_printf("ERROR: target does not support generation of object files\n");
 
     legacy::PassManager optimizer;
@@ -586,9 +588,10 @@ void jl_dump_native_impl(void *native_code,
 
     // do the actual work
     auto add_output = [&] (Module &M, StringRef unopt_bc_Name, StringRef bc_Name, StringRef obj_Name, StringRef asm_Name) {
-        preopt.run(M);
+        preopt.run(M, none);
         optimizer.run(M);
-        postopt.run(M);
+        postopt.run(M, none);
+        emitter.run(M);
         if (unopt_bc_fname)
             emit_result(unopt_bc_Archive, unopt_bc_Buffer, unopt_bc_Name, outputs);
         if (bc_fname)
