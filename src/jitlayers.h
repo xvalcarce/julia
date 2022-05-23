@@ -13,6 +13,10 @@
 #include <llvm/ExecutionEngine/Orc/IRTransformLayer.h>
 #include <llvm/ExecutionEngine/JITEventListener.h>
 
+#include <llvm/Passes/PassBuilder.h>
+#include <llvm/Passes/PassPlugin.h>
+#include <llvm/Passes/StandardInstrumentations.h>
+
 #include <llvm/Target/TargetMachine.h>
 #include "julia_assert.h"
 #include "debug-registry.h"
@@ -62,7 +66,7 @@ struct OptimizationOptions {
     bool dump_native;
     bool external_use;
 
-    static OptimizationOptions defaults() {
+    static constexpr OptimizationOptions defaults() {
         return {true, false, false};
     }
 };
@@ -78,6 +82,28 @@ DataLayout jl_create_datalayout(TargetMachine &TM);
 static inline bool imaging_default() {
     return jl_options.image_codegen || (jl_generating_output() && !jl_options.incremental);
 }
+
+struct NewPMAnalyses {
+    StandardInstrumentations SI;
+    std::unique_ptr<PassInstrumentationCallbacks> PIC;
+    LoopAnalysisManager LAM;
+    FunctionAnalysisManager FAM;
+    CGSCCAnalysisManager CGAM;
+    ModuleAnalysisManager MAM;
+    PassBuilder PB;
+
+    NewPMAnalyses(TargetMachine &TM, int opt_level);
+};
+
+struct NewPM {
+    ModulePassManager MPM;
+
+    NewPM(int opt_level, OptimizationOptions options = OptimizationOptions::defaults());
+
+    auto run(Module &M, NewPMAnalyses &analyses) {
+        return MPM.run(M, analyses.MAM);
+    }
+};
 
 struct jl_locked_stream {
     JL_STREAM *stream = nullptr;

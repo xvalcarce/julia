@@ -5,7 +5,19 @@
 
 // target support
 #include <llvm/ADT/Triple.h>
+
+//LLVM's DenseMap complains about a maybe uninitialized variable, we don't care about that
+#ifdef _COMPILER_GCC_
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
 #include <llvm/Analysis/TargetLibraryInfo.h>
+
+#ifdef _COMPILER_GCC_
+#pragma GCC diagnostic pop
+#endif
+
 #include <llvm/Analysis/TargetTransformInfo.h>
 #include <llvm/IR/DataLayout.h>
 #if JL_LLVM_VERSION >= 140000
@@ -1221,6 +1233,104 @@ void addPipeline(ModulePassManager &MPM, int opt_level, OptimizationOptions opti
         MPM.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(FPM)));
     }
 }
+
+namespace {
+    auto createPIC(StandardInstrumentations &SI) {
+        auto PIC = std::make_unique<PassInstrumentationCallbacks>();
+//Borrowed from LLVM PassBuilder.cpp:386
+#define MODULE_PASS(NAME, CREATE_PASS)                                         \
+PIC->addClassToPassName(decltype(CREATE_PASS)::name(), NAME);
+#define MODULE_PASS_WITH_PARAMS(NAME, CLASS, CREATE_PASS, PARSER, PARAMS)      \
+PIC->addClassToPassName(CLASS, NAME);
+#define MODULE_ANALYSIS(NAME, CREATE_PASS)                                     \
+PIC->addClassToPassName(decltype(CREATE_PASS)::name(), NAME);
+#define FUNCTION_PASS(NAME, CREATE_PASS)                                       \
+PIC->addClassToPassName(decltype(CREATE_PASS)::name(), NAME);
+#define FUNCTION_PASS_WITH_PARAMS(NAME, CLASS, CREATE_PASS, PARSER, PARAMS)    \
+PIC->addClassToPassName(CLASS, NAME);
+#define FUNCTION_ANALYSIS(NAME, CREATE_PASS)                                   \
+PIC->addClassToPassName(decltype(CREATE_PASS)::name(), NAME);
+#define LOOPNEST_PASS(NAME, CREATE_PASS)                                       \
+PIC->addClassToPassName(decltype(CREATE_PASS)::name(), NAME);
+#define LOOP_PASS(NAME, CREATE_PASS)                                           \
+PIC->addClassToPassName(decltype(CREATE_PASS)::name(), NAME);
+#define LOOP_PASS_WITH_PARAMS(NAME, CLASS, CREATE_PASS, PARSER, PARAMS)        \
+PIC->addClassToPassName(CLASS, NAME);
+#define LOOP_ANALYSIS(NAME, CREATE_PASS)                                       \
+PIC->addClassToPassName(decltype(CREATE_PASS)::name(), NAME);
+#define CGSCC_PASS(NAME, CREATE_PASS)                                          \
+PIC->addClassToPassName(decltype(CREATE_PASS)::name(), NAME);
+#define CGSCC_PASS_WITH_PARAMS(NAME, CLASS, CREATE_PASS, PARSER, PARAMS)       \
+PIC->addClassToPassName(CLASS, NAME);
+#define CGSCC_ANALYSIS(NAME, CREATE_PASS)                                      \
+PIC->addClassToPassName(decltype(CREATE_PASS)::name(), NAME);
+
+#include "llvm-julia-passes.inc"
+
+#undef MODULE_PASS
+#undef MODULE_PASS_WITH_PARAMS
+#undef MODULE_ANALYSIS
+#undef FUNCTION_PASS
+#undef FUNCTION_PASS_WITH_PARAMS
+#undef FUNCTION_ANALYSIS
+#undef LOOPNEST_PASS
+#undef LOOP_PASS
+#undef LOOP_PASS_WITH_PARAMS
+#undef LOOP_ANALYSIS
+#undef CGSCC_PASS
+#undef CGSCC_PASS_WITH_PARAMS
+#undef CGSCC_ANALYSIS
+
+        SI.registerCallbacks(*PIC);
+        return PIC;
+    }
+
+    FunctionAnalysisManager createFAM(int opt_level, TargetIRAnalysis analysis, const Triple &triple) {
+
+        FunctionAnalysisManager FAM;
+        // Register the AA manager first so that our version is the one used.
+        FAM.registerPass([&] {
+            AAManager AA;
+            // TODO: Why are we only doing this for -O3?
+            if (opt_level >= 3) {
+                AA.registerFunctionAnalysis<BasicAA>();
+            }
+            if (opt_level >= 2) {
+                AA.registerFunctionAnalysis<ScopedNoAliasAA>();
+                AA.registerFunctionAnalysis<TypeBasedAA>();
+            }
+            // TM->registerDefaultAliasAnalyses(AA);
+            return AA;
+        });
+        // Register our TargetLibraryInfoImpl.
+        FAM.registerPass([&] { return llvm::TargetIRAnalysis(analysis); });
+        FAM.registerPass([&] { return llvm::TargetLibraryAnalysis(llvm::TargetLibraryInfoImpl(triple)); });
+        return FAM;
+    }
+
+    PassBuilder createPB(TargetMachine &TM, PassInstrumentationCallbacks &PIC, NewPMAnalyses &analyses) {
+        PassBuilder PB{&TM, PipelineTuningOptions(), None, &PIC};
+        PB.registerLoopAnalyses(analyses.LAM);
+        PB.registerFunctionAnalyses(analyses.FAM);
+        PB.registerCGSCCAnalyses(analyses.CGAM);
+        PB.registerModuleAnalyses(analyses.MAM);
+        PB.crossRegisterProxies(analyses.LAM, analyses.FAM, analyses.CGAM, analyses.MAM);
+        return PB;
+    }
+
+    ModulePassManager createMPM(int opt_level, OptimizationOptions options) {
+        ModulePassManager MPM;
+        addPipeline(MPM, opt_level, options);
+        return MPM;
+    }
+}
+
+NewPMAnalyses::NewPMAnalyses(TargetMachine &TM, int opt_level) :
+    SI(false), PIC(createPIC(SI)), LAM(),
+    FAM(createFAM(opt_level, TM.getTargetIRAnalysis(), TM.getTargetTriple())),
+    CGAM(), MAM(), PB(createPB(TM, *PIC, *this)) {}
+
+NewPM::NewPM(int opt_level, OptimizationOptions options) : MPM(createMPM(opt_level, options)) {}
 
 // TODO(vchuravy/maleadt):
 // Since we are not using the PassBuilder fully and instead rolling our own, we are missing out on
