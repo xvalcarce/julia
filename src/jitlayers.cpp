@@ -865,7 +865,11 @@ namespace {
 
 namespace {
 
+#ifdef JL_USE_NEW_PM
+    typedef NewPM PassManager;
+#else
     typedef legacy::PassManager PassManager;
+#endif
 
     orc::JITTargetMachineBuilder createJTMBFromTM(TargetMachine &TM, int optlevel) {
         return orc::JITTargetMachineBuilder(TM.getTargetTriple())
@@ -888,9 +892,21 @@ namespace {
     };
 
     struct PMCreator {
+#ifdef JL_USE_NEW_PM
+        orc::JITTargetMachineBuilder JTMB;
+#else
         std::unique_ptr<TargetMachine> TM;
+#endif
         int optlevel;
-        PMCreator(TargetMachine &TM, int optlevel) : TM(cantFail(createJTMBFromTM(TM, optlevel).createTargetMachine())), optlevel(optlevel) {}
+        PMCreator(TargetMachine &TM, int optlevel) :
+#ifdef JL_USE_NEW_PM
+            JTMB(createJTMBFromTM(TM, optlevel)),
+#else
+            TM(cantFail(createJTMBFromTM(TM, optlevel).createTargetMachine())),
+#endif
+            optlevel(optlevel) {}
+
+#ifndef JL_USE_NEW_PM
         PMCreator(const PMCreator &other) : PMCreator(*other.TM, other.optlevel) {}
         PMCreator(PMCreator &&other) : TM(std::move(other.TM)), optlevel(other.optlevel) {}
         friend void swap(PMCreator &self, PMCreator &other) {
@@ -902,12 +918,18 @@ namespace {
             swap(*this, other);
             return *this;
         }
+#endif
+
         std::unique_ptr<PassManager> operator()() {
+#ifdef JL_USE_NEW_PM
+            return std::make_unique<NewPM>(cantFail(JTMB.createTargetMachine()), optlevel);
+#else
             auto PM = std::make_unique<legacy::PassManager>();
             addTargetPasses(PM.get(), TM->getTargetTriple(), TM->getTargetIRAnalysis());
             addOptimizationPasses(PM.get(), optlevel);
             addMachinePasses(PM.get(), optlevel);
             return PM;
+#endif
         }
     };
 

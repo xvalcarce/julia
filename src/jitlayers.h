@@ -511,6 +511,8 @@ Pass *createLowerSimdLoopPass();
 // NewPM
 #include "passes.h"
 
+#define JL_USE_NEW_PM
+
 // Whether the Function is an llvm or julia intrinsic.
 static inline bool isIntrinsicFunction(Function *F)
 {

@@ -530,6 +530,11 @@ void jl_dump_native_impl(void *native_code,
             CodeGenOpt::Aggressive // -O3 TODO: respect command -O0 flag?
             ));
 
+    // Reset the target triple to make sure it matches the new target machine
+    auto dataM = data->M.getModuleUnlocked();
+    dataM->setTargetTriple(TM->getTargetTriple().str());
+    dataM->setDataLayout(jl_create_datalayout(*TM));
+
 
     // set up optimization passes
     SmallVector<char, 0> bc_Buffer;
@@ -555,7 +560,6 @@ void jl_dump_native_impl(void *native_code,
 
     if (bc_fname)
         postopt.addPass(BitcodeWriterPass(bc_OS));
-    //Is this necessary for TM?
     addTargetPasses(&emitter, TM->getTargetTriple(), TM->getTargetIRAnalysis());
     if (obj_fname)
         if (TM->addPassesToEmitFile(emitter, obj_OS, nullptr, CGFT_ObjectFile, false))
@@ -564,17 +568,16 @@ void jl_dump_native_impl(void *native_code,
         if (TM->addPassesToEmitFile(emitter, asm_OS, nullptr, CGFT_AssemblyFile, false))
             jl_safe_printf("ERROR: target does not support generation of object files\n");
 
+#ifdef JL_USE_NEW_PM
+    NewPM optimizer(std::move(TM), jl_options.opt_level, {true, true, false});
+#else
     legacy::PassManager optimizer;
     if (bc_fname || obj_fname || asm_fname) {
         addTargetPasses(&optimizer, TM->getTargetTriple(), TM->getTargetIRAnalysis());
         addOptimizationPasses(&optimizer, jl_options.opt_level, {true, true, false});
         addMachinePasses(&optimizer, jl_options.opt_level);
     }
-
-    // Reset the target triple to make sure it matches the new target machine
-    auto dataM = data->M.getModuleUnlocked();
-    dataM->setTargetTriple(TM->getTargetTriple().str());
-    dataM->setDataLayout(jl_create_datalayout(*TM));
+#endif
     Type *T_size;
     if (sizeof(size_t) == 8)
         T_size = Type::getInt64Ty(Context);
@@ -601,11 +604,13 @@ void jl_dump_native_impl(void *native_code,
     // do the actual work
     auto add_output = [&] (Module &M, StringRef unopt_bc_Name, StringRef bc_Name, StringRef obj_Name, StringRef asm_Name) {
         preopt.run(M, none);
+        if (unopt_bc_fname)
+            emit_result(unopt_bc_Archive, unopt_bc_Buffer, unopt_bc_Name, outputs);
+        if (!bc_fname && !obj_fname && !asm_fname)
+            return;
         optimizer.run(M);
         postopt.run(M, none);
         emitter.run(M);
-        if (unopt_bc_fname)
-            emit_result(unopt_bc_Archive, unopt_bc_Buffer, unopt_bc_Name, outputs);
         if (bc_fname)
             emit_result(bc_Archive, bc_Buffer, bc_Name, outputs);
         if (obj_fname)
@@ -1417,48 +1422,6 @@ PreservedAnalyses NewPM::run(Module &M) {
 // or adapting PassBuilder (or subclassing it) to suite our needs. This is in particular important for
 // BPF, NVPTX, and AMDGPU.
 
-void optimizeModule(Module &M, TargetMachine *TM, int opt_level, OptimizationOptions options)
-{
-    // llvm::PassBuilder pb(targetMachine->LLVM, llvm::PipelineTuningOptions(), llvm::None, &passInstrumentationCallbacks);
-    PassBuilder PB;
-    // Create the analysis managers.
-    LoopAnalysisManager LAM;
-    PB.registerLoopAnalyses(LAM);
-
-    AAManager AA;
-    // TODO: Why are we only doing this for -O3?
-    if (opt_level >= 3) {
-        AA.registerFunctionAnalysis<BasicAA>();
-    }
-    if (opt_level >= 2) {
-        AA.registerFunctionAnalysis<ScopedNoAliasAA>();
-        AA.registerFunctionAnalysis<TypeBasedAA>();
-    }
-    // TM->registerDefaultAliasAnalyses(AA);
-
-    FunctionAnalysisManager FAM;
-    // Register the AA manager first so that our version is the one used.
-    FAM.registerPass([&] { return std::move(AA); });
-     // Register our TargetLibraryInfoImpl.
-    FAM.registerPass([&] { return llvm::TargetIRAnalysis(TM->getTargetIRAnalysis()); });
-    FAM.registerPass([&] { return llvm::TargetLibraryAnalysis(llvm::TargetLibraryInfoImpl(TM->getTargetTriple())); });
-
-    PB.registerFunctionAnalyses(FAM);
-
-    CGSCCAnalysisManager CGAM;
-    PB.registerCGSCCAnalyses(CGAM);
-
-    ModuleAnalysisManager MAM;
-    PB.registerModuleAnalyses(MAM);
-
-    PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-
-    ModulePassManager MPM;
-    addPipeline(MPM, opt_level, options);
-
-    MPM.run(M, MAM);
-}
-
 // new pass manager plugin
 
 // NOTE: Instead of exporting all the constructors in passes.h we could
@@ -1577,10 +1540,14 @@ void *jl_get_llvmf_defn_impl(jl_method_instance_t *mi, size_t world, char getwra
             for (auto &global : output.globals)
                 global.second->setLinkage(GlobalValue::ExternalLinkage);
             if (optimize) {
+#ifdef JL_USE_NEW_PM
+                NewPM PM(jl_ExecutionEngine->cloneTargetMachine(), jl_options.opt_level);
+#else
                 legacy::PassManager PM;
                 addTargetPasses(&PM, jl_ExecutionEngine->getTargetTriple(), jl_ExecutionEngine->getTargetIRAnalysis());
                 addOptimizationPasses(&PM, jl_options.opt_level);
                 addMachinePasses(&PM, jl_options.opt_level);
+#endif
                 //Safe b/c context lock is held by output
                 PM.run(*m.getModuleUnlocked());
             }
