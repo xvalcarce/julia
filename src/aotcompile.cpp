@@ -1386,16 +1386,6 @@ PIC->addClassToPassName(decltype(CREATE_PASS)::name(), NAME);
         return FAM;
     }
 
-    PassBuilder createPB(TargetMachine &TM, PassInstrumentationCallbacks &PIC, NewPMAnalyses &analyses) {
-        PassBuilder PB{&TM, PipelineTuningOptions(), None, &PIC};
-        PB.registerLoopAnalyses(analyses.LAM);
-        PB.registerFunctionAnalyses(analyses.FAM);
-        PB.registerCGSCCAnalyses(analyses.CGAM);
-        PB.registerModuleAnalyses(analyses.MAM);
-        PB.crossRegisterProxies(analyses.LAM, analyses.FAM, analyses.CGAM, analyses.MAM);
-        return PB;
-    }
-
     ModulePassManager createMPM(int opt_level, OptimizationOptions options) {
         ModulePassManager MPM;
         addPipeline(MPM, opt_level, options);
@@ -1403,12 +1393,23 @@ PIC->addClassToPassName(decltype(CREATE_PASS)::name(), NAME);
     }
 }
 
-NewPMAnalyses::NewPMAnalyses(TargetMachine &TM, int opt_level) :
-    SI(false), PIC(createPIC(SI)), LAM(),
-    FAM(createFAM(opt_level, TM.getTargetIRAnalysis(), TM.getTargetTriple())),
-    CGAM(), MAM(), PB(createPB(TM, *PIC, *this)) {}
+NewPM::NewPM(std::unique_ptr<TargetMachine> TM, int opt_level, OptimizationOptions options) :
+    TM(std::move(TM)), SI(false), PIC(createPIC(SI)),
+    PB(this->TM.get(), PipelineTuningOptions(), None, PIC.get()),
+    MPM(createMPM(opt_level, options)), opt_level(opt_level) {}
 
-NewPM::NewPM(int opt_level, OptimizationOptions options) : MPM(createMPM(opt_level, options)) {}
+PreservedAnalyses NewPM::run(Module &M) {
+    LoopAnalysisManager LAM;
+    FunctionAnalysisManager FAM(createFAM(opt_level, TM->getTargetIRAnalysis(), TM->getTargetTriple()));
+    CGSCCAnalysisManager CGAM;
+    ModuleAnalysisManager MAM;
+    PB.registerLoopAnalyses(LAM);
+    PB.registerFunctionAnalyses(FAM);
+    PB.registerCGSCCAnalyses(CGAM);
+    PB.registerModuleAnalyses(MAM);
+    PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+    return MPM.run(M, MAM);
+}
 
 // TODO(vchuravy/maleadt):
 // Since we are not using the PassBuilder fully and instead rolling our own, we are missing out on

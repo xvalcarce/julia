@@ -83,26 +83,17 @@ static inline bool imaging_default() {
     return jl_options.image_codegen || (jl_generating_output() && !jl_options.incremental);
 }
 
-struct NewPMAnalyses {
+struct NewPM {
+    std::unique_ptr<TargetMachine> TM;
     StandardInstrumentations SI;
     std::unique_ptr<PassInstrumentationCallbacks> PIC;
-    LoopAnalysisManager LAM;
-    FunctionAnalysisManager FAM;
-    CGSCCAnalysisManager CGAM;
-    ModuleAnalysisManager MAM;
     PassBuilder PB;
-
-    NewPMAnalyses(TargetMachine &TM, int opt_level);
-};
-
-struct NewPM {
     ModulePassManager MPM;
+    int opt_level;
 
-    NewPM(int opt_level, OptimizationOptions options = OptimizationOptions::defaults());
+    NewPM(std::unique_ptr<TargetMachine> TM, int opt_level, OptimizationOptions options = OptimizationOptions::defaults());
 
-    auto run(Module &M, NewPMAnalyses &analyses) {
-        return MPM.run(M, analyses.MAM);
-    }
+    PreservedAnalyses run(Module &M);
 };
 
 struct jl_locked_stream {
