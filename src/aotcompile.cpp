@@ -551,7 +551,6 @@ void jl_dump_native_impl(void *native_code,
     std::vector<NewArchiveMember> unopt_bc_Archive;
     std::vector<std::string> outputs;
 
-    ModuleAnalysisManager none;
     ModulePassManager preopt, postopt;
     legacy::PassManager emitter;
 
@@ -603,13 +602,18 @@ void jl_dump_native_impl(void *native_code,
 
     // do the actual work
     auto add_output = [&] (Module &M, StringRef unopt_bc_Name, StringRef bc_Name, StringRef obj_Name, StringRef asm_Name) {
-        preopt.run(M, none);
+        AnalysisManagers AM;
+        PassBuilder PB;
+        AM.crossRegister(PB);
+        preopt.run(M, AM.MAM);
         if (unopt_bc_fname)
             emit_result(unopt_bc_Archive, unopt_bc_Buffer, unopt_bc_Name, outputs);
         if (!bc_fname && !obj_fname && !asm_fname)
             return;
         optimizer.run(M);
-        postopt.run(M, none);
+        AM = AnalysisManagers();
+        AM.crossRegister(PB);
+        postopt.run(M, AM.MAM);
         emitter.run(M);
         if (bc_fname)
             emit_result(bc_Archive, bc_Buffer, bc_Name, outputs);
@@ -1403,17 +1407,22 @@ NewPM::NewPM(std::unique_ptr<TargetMachine> TM, int opt_level, OptimizationOptio
     PB(this->TM.get(), PipelineTuningOptions(), None, PIC.get()),
     MPM(createMPM(opt_level, options)), opt_level(opt_level) {}
 
-PreservedAnalyses NewPM::run(Module &M) {
-    LoopAnalysisManager LAM;
-    FunctionAnalysisManager FAM(createFAM(opt_level, TM->getTargetIRAnalysis(), TM->getTargetTriple()));
-    CGSCCAnalysisManager CGAM;
-    ModuleAnalysisManager MAM;
+AnalysisManagers::AnalysisManagers(PassBuilder &PB, TargetMachine &TM, int opt_level) :
+    LAM(), FAM(createFAM(opt_level, TM.getTargetIRAnalysis(), TM.getTargetTriple())), CGAM(), MAM() {
+    crossRegister(PB);
+}
+
+void AnalysisManagers::crossRegister(PassBuilder &PB) {
     PB.registerLoopAnalyses(LAM);
     PB.registerFunctionAnalyses(FAM);
     PB.registerCGSCCAnalyses(CGAM);
     PB.registerModuleAnalyses(MAM);
     PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-    return MPM.run(M, MAM);
+}
+
+PreservedAnalyses NewPM::run(Module &M) {
+    AnalysisManagers analyses(PB, *TM, opt_level);
+    return MPM.run(M, analyses.MAM);
 }
 
 // TODO(vchuravy/maleadt):

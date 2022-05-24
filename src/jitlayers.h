@@ -83,6 +83,18 @@ static inline bool imaging_default() {
     return jl_options.image_codegen || (jl_generating_output() && !jl_options.incremental);
 }
 
+struct AnalysisManagers {
+    LoopAnalysisManager LAM;
+    FunctionAnalysisManager FAM;
+    CGSCCAnalysisManager CGAM;
+    ModuleAnalysisManager MAM;
+
+    AnalysisManagers() = default;
+    AnalysisManagers(PassBuilder &PB, TargetMachine &TM, int opt_level);
+
+    void crossRegister(PassBuilder &PB);
+};
+
 struct NewPM {
     std::unique_ptr<TargetMachine> TM;
     StandardInstrumentations SI;

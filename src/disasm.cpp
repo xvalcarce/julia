@@ -483,9 +483,11 @@ void jl_strip_llvm_debug(Module *m)
 void jl_strip_llvm_addrspaces(Module *m)
 {
     ModulePassManager PM;
-    ModuleAnalysisManager MAM;
+    AnalysisManagers AM;
+    PassBuilder PB;
+    AM.crossRegister(PB);
     PM.addPass(RemoveJuliaAddrspacesPass());
-    PM.run(*m, MAM);
+    PM.run(*m, AM.MAM);
 }
 
 // print an llvm IR acquired from jl_get_llvmf
