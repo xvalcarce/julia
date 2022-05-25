@@ -56,47 +56,50 @@
 #endif
 
 // NewPM needs to manually include all the pass headers
-#include "llvm/Transforms/IPO/AlwaysInliner.h"
+#include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/IPO/ConstantMerge.h>
-#include "llvm/Transforms/InstCombine/InstCombine.h"
-#include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
-#include "llvm/Transforms/Instrumentation/MemorySanitizer.h"
-#include "llvm/Transforms/Instrumentation/ThreadSanitizer.h"
-#include "llvm/Transforms/Scalar/ADCE.h"
-#include "llvm/Transforms/Scalar/CorrelatedValuePropagation.h"
-#include "llvm/Transforms/Scalar/DCE.h"
-#include "llvm/Transforms/Scalar/DeadStoreElimination.h"
-#include "llvm/Transforms/Scalar/DivRemPairs.h"
-#include "llvm/Transforms/Scalar/EarlyCSE.h"
-#include "llvm/Transforms/Scalar/GVN.h"
-#include "llvm/Transforms/Scalar/IndVarSimplify.h"
-#include "llvm/Transforms/Scalar/InductiveRangeCheckElimination.h"
-#include "llvm/Transforms/Scalar/InstSimplifyPass.h"
-#include "llvm/Transforms/Scalar/JumpThreading.h"
-#include "llvm/Transforms/Scalar/LICM.h"
-#include "llvm/Transforms/Scalar/LoopDeletion.h"
-#include "llvm/Transforms/Scalar/LoopIdiomRecognize.h"
-#include "llvm/Transforms/Scalar/LoopInstSimplify.h"
-#include "llvm/Transforms/Scalar/LoopLoadElimination.h"
-#include "llvm/Transforms/Scalar/LoopRotation.h"
-#include "llvm/Transforms/Scalar/LoopSimplifyCFG.h"
-#include "llvm/Transforms/Scalar/LoopUnrollPass.h"
-#include "llvm/Transforms/Scalar/MemCpyOptimizer.h"
-#include "llvm/Transforms/Scalar/Reassociate.h"
-#include "llvm/Transforms/Scalar/SCCP.h"
-#include "llvm/Transforms/Scalar/SROA.h"
-#include "llvm/Transforms/Scalar/SimpleLoopUnswitch.h"
-#include "llvm/Transforms/Scalar/SimplifyCFG.h"
-#include "llvm/Transforms/Vectorize/LoopVectorize.h"
-#include "llvm/Transforms/Vectorize/SLPVectorizer.h"
-#include "llvm/Transforms/Vectorize/VectorCombine.h"
+#include <llvm/Transforms/InstCombine/InstCombine.h>
+#include <llvm/Transforms/Instrumentation/AddressSanitizer.h>
+#include <llvm/Transforms/Instrumentation/MemorySanitizer.h>
+#include <llvm/Transforms/Instrumentation/ThreadSanitizer.h>
+#include <llvm/Transforms/Scalar/ADCE.h>
+#include <llvm/Transforms/Scalar/CorrelatedValuePropagation.h>
+#include <llvm/Transforms/Scalar/DCE.h>
+#include <llvm/Transforms/Scalar/DeadStoreElimination.h>
+#include <llvm/Transforms/Scalar/DivRemPairs.h>
+#include <llvm/Transforms/Scalar/EarlyCSE.h>
+#include <llvm/Transforms/Scalar/GVN.h>
+#include <llvm/Transforms/Scalar/IndVarSimplify.h>
+#include <llvm/Transforms/Scalar/InductiveRangeCheckElimination.h>
+#include <llvm/Transforms/Scalar/InstSimplifyPass.h>
+#include <llvm/Transforms/Scalar/JumpThreading.h>
+#include <llvm/Transforms/Scalar/LICM.h>
+#include <llvm/Transforms/Scalar/LoopDeletion.h>
+#include <llvm/Transforms/Scalar/LoopIdiomRecognize.h>
+#include <llvm/Transforms/Scalar/LoopInstSimplify.h>
+#include <llvm/Transforms/Scalar/LoopLoadElimination.h>
+#include <llvm/Transforms/Scalar/LoopRotation.h>
+#include <llvm/Transforms/Scalar/LoopSimplifyCFG.h>
+#include <llvm/Transforms/Scalar/LoopUnrollPass.h>
+#include <llvm/Transforms/Scalar/MemCpyOptimizer.h>
+#include <llvm/Transforms/Scalar/Reassociate.h>
+#include <llvm/Transforms/Scalar/SCCP.h>
+#include <llvm/Transforms/Scalar/SROA.h>
+#include <llvm/Transforms/Scalar/SimpleLoopUnswitch.h>
+#include <llvm/Transforms/Scalar/SimplifyCFG.h>
+#include <llvm/Transforms/Vectorize/LoopVectorize.h>
+#include <llvm/Transforms/Vectorize/SLPVectorizer.h>
+#include <llvm/Transforms/Vectorize/VectorCombine.h>
 
-
+#if JL_LLVM_VERSION < 140000
+typedef GVN GVNPass
+typedef SROA SROAPass
+#endif
 
 // for outputting code
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/Bitcode/BitcodeWriterPass.h>
-#include "llvm/Object/ArchiveWriter.h"
+#include <llvm/Object/ArchiveWriter.h>
 #include <llvm/IR/IRPrintingPasses.h>
 
 #include <llvm/IR/LegacyPassManagers.h>
@@ -1094,7 +1097,7 @@ static void addPipeline(ModulePassManager &MPM, int opt_level, OptimizationOptio
             FunctionPassManager FPM;
             FPM.addPass(SimplifyCFGPass(simplifyCFGOptions));
             if (opt_level == 1) {
-                FPM.addPass(SROA());
+                FPM.addPass(SROAPass());
                 FPM.addPass(InstCombinePass());
                 FPM.addPass(EarlyCSEPass());
                 // maybe add GVN?
@@ -1145,7 +1148,7 @@ static void addPipeline(ModulePassManager &MPM, int opt_level, OptimizationOptio
         FPM.addPass(PropagateJuliaAddrspacesPass());
         FPM.addPass(SimplifyCFGPass(simplifyCFGOptions));
         FPM.addPass(DCEPass());
-        FPM.addPass(SROA());
+        FPM.addPass(SROAPass());
         // FPM.addPass(MemCpyOptPass());
         MPM.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(FPM)));
     }
@@ -1166,7 +1169,7 @@ static void addPipeline(ModulePassManager &MPM, int opt_level, OptimizationOptio
     MPM.addPass(CPUFeatures());
     {
         FunctionPassManager FPM;
-        FPM.addPass(SROA());
+        FPM.addPass(SROAPass());
         FPM.addPass(InstSimplifyPass());
         FPM.addPass(JumpThreadingPass());
         FPM.addPass(CorrelatedValuePropagationPass());
@@ -1216,9 +1219,9 @@ static void addPipeline(ModulePassManager &MPM, int opt_level, OptimizationOptio
         FPM.addPass(AllocOptPass());
         // Re-run SROA after loop-unrolling (useful for small loops that operate,
         // over the structure of an aggregate)
-        FPM.addPass(SROA());
+        FPM.addPass(SROAPass());
         FPM.addPass(InstSimplifyPass());
-        FPM.addPass(GVN());
+        FPM.addPass(GVNPass());
         FPM.addPass(MemCpyOptPass());
         FPM.addPass(SCCPPass());
         // These next two passes must come before IRCE to eliminate the bounds check in #43308
@@ -1232,7 +1235,7 @@ static void addPipeline(ModulePassManager &MPM, int opt_level, OptimizationOptio
         FPM.addPass(InstCombinePass());
         FPM.addPass(JumpThreadingPass());
         if (opt_level >= 3) {
-            FPM.addPass(GVN()); // Must come after JumpThreading and before LoopVectorize
+            FPM.addPass(GVNPass()); // Must come after JumpThreading and before LoopVectorize
         }
         FPM.addPass(DSEPass());
         // More dead allocation (store) deletion before loop optimization
@@ -1295,7 +1298,7 @@ static void addPipeline(ModulePassManager &MPM, int opt_level, OptimizationOptio
         // and remove some unnecessary write barrier checks.
         {
             FunctionPassManager FPM;
-            FPM.addPass(GVN());
+            FPM.addPass(GVNPass());
             FPM.addPass(SCCPPass());
             // Remove dead use of ptls
             FPM.addPass(DCEPass());
