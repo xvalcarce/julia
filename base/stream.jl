@@ -375,7 +375,7 @@ if OS_HANDLE != RawFD
 end
 
 function isopen(x::Union{LibuvStream, LibuvServer})
-    if x.status == StatusUninit || x.status == StatusInit
+    if x.status == StatusUninit || x.status == StatusInit || x.handle === C_NULL
         throw(ArgumentError("$x is not initialized"))
     end
     return x.status != StatusClosed && x.status != StatusEOF
